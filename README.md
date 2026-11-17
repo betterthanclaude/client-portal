@@ -10,6 +10,20 @@ S3 references and project upload keys are backed by the local service.
 The current sign-in UI and local workspace trust are development-only. Production
 account integration and durable cloud storage are described in the deployment handoff.
 
+## Deploy the frontend on Vercel
+
+Import this repository with **Root Directory set to the repository root** (leave
+the field empty), not `server/`. The checked-in `vercel.json` selects Vite, installs
+the lockfile with `npm ci`, runs `npm run build`, and publishes `dist/`. This overrides
+FastAPI framework detection. Navigation uses URL hashes, so no SPA catch-all rewrite
+is needed.
+
+This deployment serves the frontend. The local Python intake service and Vite's
+`/workspace` and `/qc-api` development proxies are not deployed with static files.
+Connect an authenticated production backend using the [deployment handoff](docs/deployment-handoff.md)
+before expecting uploads, projects or QC calls to work on the hosted frontend. Do
+not add local service keys or QC credentials to `VITE_` environment variables.
+
 ## Frontend template
 
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
