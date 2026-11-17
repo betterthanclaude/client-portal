@@ -1,6 +1,6 @@
 # Kanook decisions
 
-- 2026-11-17: Fixed Vercel's FastAPI misdetection by declaring the Vite framework, lockfile install, frontend build and `dist` output in `vercel.json`. Deploy from the repository root; Python intake and development proxies still require a separate authenticated production backend.
+- 2026-11-17: Fixed Vercel's FastAPI misdetection by declaring the Vite framework, lockfile install, frontend build and `dist` output in `vercel.json`. The existing Vercel project also had Root Directory set to `server`, causing a missing-output error even after Vite built successfully; cleared that setting and changed its framework preset to Vite. Verified settings persisted after reload and the local production build passed. Python intake and development proxies still require a separate authenticated production backend.
 
 - 2026-11-17: Prepared the client portal for the user-requested GitHub repository `betterthanclaude/client-portal` on `main`; excluded local credentials, uploaded data, environments, dependencies and build artifacts from source control.
 
