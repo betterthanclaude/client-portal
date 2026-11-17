@@ -1,3 +1,4 @@
+import { DEMO_MODE } from '../lib/demo';
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { listConnections, type StorageConnection } from "../lib/qc-api";
 import { connectBucket, indexBucket, listFiles, uploadFile, type S3Connection, type StoredFile } from "../lib/workspace-api";
@@ -54,14 +55,14 @@ export function ProjectUploads({ projectId, onUseApi }: { projectId: string; onU
     setBusy(true); setNotice(null);
     try {
       const result = await connectBucket(projectId, {
-        bucket_url: String(data.get("bucket_url")).trim(), region: String(data.get("region")).trim(),
+        bucket_url: String(data.get("bucket_url")).trim(), region: String(data.get("region") || "us-east-1").trim(),
         access_key_id: String(data.get("access_key_id")).trim(), secret_access_key: String(data.get("secret_access_key")).trim(),
         session_token: String(data.get("session_token") || "").trim() || undefined,
       });
       setConnection(result);
       for (const name of ["access_key_id", "secret_access_key", "session_token"]) (form.elements.namedItem(name) as HTMLInputElement).value = "";
       await refreshFiles();
-      setNotice(`${result.indexed} file references added. Files remain in your S3 bucket.${result.next_cursor ? " More files are available below." : ""}`);
+      setNotice(DEMO_MODE ? `${result.indexed} sample files added. No connection to a real bucket was made.` : `${result.indexed} file references added. Files remain in your S3 bucket.${result.next_cursor ? " More files are available below." : ""}`);
     } catch (error) { setNotice(message(error)); }
     finally { setBusy(false); }
   }
@@ -91,7 +92,7 @@ export function ProjectUploads({ projectId, onUseApi }: { projectId: string; onU
         setFiles((current) => current.filter((item) => fileId(item) !== fileId(file)));
         uploaded++;
       }
-      setNotice(`${uploaded} ${uploaded === 1 ? "file uploaded" : "files uploaded"} to your project.`);
+      setNotice(DEMO_MODE ? `${uploaded} file previews added. Only names and sizes are saved in this browser.` : `${uploaded} ${uploaded === 1 ? "file uploaded" : "files uploaded"} to your project.`);
     } catch (error) { setNotice(`${uploaded ? `${uploaded} uploaded. ` : ""}${message(error)}`); }
     finally { setBusy(false); setProgress(null); uploadController.current = null; }
   }
@@ -102,7 +103,7 @@ export function ProjectUploads({ projectId, onUseApi }: { projectId: string; onU
       const result = await listConnections(after);
       setQcConnections((current) => after ? [...current, ...result.items] : result.items);
       setQcCursor(result.next_cursor);
-      setQcNotice("Connected to your deployed QC API. Registered storage is shown below.");
+      setQcNotice(DEMO_MODE ? "Sample storage connection. No real QC service was contacted." : "Connected to your deployed QC API. Registered storage is shown below.");
     } catch (error) { setQcNotice(message(error)); }
     finally { setQcLoading(false); }
   }
@@ -118,7 +119,8 @@ export function ProjectUploads({ projectId, onUseApi }: { projectId: string; onU
       <div hidden={method !== "s3"}>
         <form className="s3-form" onSubmit={(event) => void connect(event)}>
           <label htmlFor="bucket-url">S3 bucket URL</label>
-          <input id="bucket-url" name="bucket_url" placeholder="s3://your-bucket/folder/" required disabled={busy} autoComplete="off" />
+          <input id="bucket-url" name="bucket_url" placeholder="s3://your-bucket/folder/" defaultValue={DEMO_MODE ? "s3://acme-sample-datasets/" : undefined} required disabled={busy} autoComplete="off" />
+          {!DEMO_MODE && <>
           <div className="s3-credentials">
             <div><label htmlFor="s3-access">Access key ID</label><input id="s3-access" name="access_key_id" required disabled={busy} autoComplete="off" placeholder="Access key ID" /></div>
             <div><label htmlFor="s3-secret">Secret access key</label><input id="s3-secret" name="secret_access_key" type="password" required disabled={busy} autoComplete="new-password" placeholder="Secret access key" /></div>
@@ -127,7 +129,8 @@ export function ProjectUploads({ projectId, onUseApi }: { projectId: string; onU
             <div><label htmlFor="s3-region">AWS region</label><input id="s3-region" name="region" defaultValue="us-east-1" required disabled={busy} /></div>
             <div><label htmlFor="s3-session">Session token <span>(optional)</span></label><input id="s3-session" name="session_token" type="password" disabled={busy} autoComplete="new-password" placeholder="For temporary credentials" /></div>
           </div>
-          <div className="upload-submit-row"><p>Use read-only bucket access. Files stay in S3; credentials are kept only for this service session.</p><button className="brown-btn" type="submit" disabled={busy}>{busy ? "Connecting…" : "Connect bucket"} <span aria-hidden="true">→</span></button></div>
+          </>}
+          <div className="upload-submit-row"><p>{DEMO_MODE ? 'Try a sample import. No AWS credentials needed.' : 'Use read-only bucket access. Files stay in S3; credentials are kept only for this service session.'}</p><button className="brown-btn" type="submit" disabled={busy}>{busy ? "Connecting…" : DEMO_MODE ? "Import sample files" : "Connect bucket"} <span aria-hidden="true">→</span></button></div>
         </form>
         {connection?.next_cursor && <button className="outline-btn more-files" type="button" disabled={busy} onClick={() => void loadMore()}>Import next 1,000 references</button>}
       </div>
@@ -138,14 +141,14 @@ export function ProjectUploads({ projectId, onUseApi }: { projectId: string; onU
           onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
           onDrop={(event) => { event.preventDefault(); setDragging(false); selectFiles(event.dataTransfer.files); }}>
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6" /></svg>
-          <p>Drop files here</p><span>or choose them from your device</span>
+          <p>Drop files here</p><span>{DEMO_MODE ? "Preview file names and sizes — nothing leaves your device" : "or choose them from your device"}</span>
           <button type="button" className="outline-btn" disabled={busy} onClick={() => fileInput.current?.click()}>Choose files</button>
           <input ref={fileInput} className="sr" type="file" multiple disabled={busy} aria-label="Choose files from device" tabIndex={-1}
             onChange={(event) => { if (event.target.files) selectFiles(event.target.files); event.target.value = ""; }} />
         </div>
         {files.length > 0 && <>
           <ul className="selected-files" aria-label="Selected files">{files.map((file) => <li key={fileId(file)}><span className="file-name">{file.name}</span><small>{fileSize(file.size)}</small><button type="button" className="remove-file" disabled={busy} aria-label={`Remove ${file.name}`} onClick={() => setFiles((current) => current.filter((item) => fileId(item) !== fileId(file)))}>×</button></li>)}</ul>
-          <div className="upload-submit-row"><p>{files.length} {files.length === 1 ? "file" : "files"} selected</p><button type="button" className="brown-btn" disabled={busy} onClick={() => void sendFiles()}>{busy ? "Uploading…" : "Upload files"}</button></div>
+          <div className="upload-submit-row"><p>{files.length} {files.length === 1 ? "file" : "files"} selected</p><button type="button" className="brown-btn" disabled={busy} onClick={() => void sendFiles()}>{busy ? "Uploading…" : DEMO_MODE ? "Add file previews" : "Upload files"}</button></div>
         </>}
         {progress && <div className="upload-progress" role="status"><label htmlFor="file-progress">{progress.name} · {progress.percent === 100 ? "Saving…" : `${progress.percent}%`}</label><progress id="file-progress" max={100} value={progress.percent} /><button type="button" className="outline-btn" onClick={() => uploadController.current?.abort()}>Cancel upload</button></div>}
       </div>

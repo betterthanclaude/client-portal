@@ -1,3 +1,4 @@
+import { DEMO_MODE, demoRequest } from './demo.ts';
 export type StorageConnection = { id: string };
 export type ConnectionReceipt = StorageConnection & {
   registered: boolean;
@@ -14,14 +15,16 @@ export type IssuedKey = {
   scopes?: string[];
 };
 export type QcKey = { id: string; name: string; scopes: string[]; created: number; expires: number; revoked: number | boolean; last_used: number | null };
-export type UsageRun = { id: string; status: string; created: number; run_kind: string; measured_hours: number | null; measurement: string };
+export type UsageRun = { id: string; status: string; created: number; run_kind: string; measured_hours: number | null; measurement: string; cost_usd?: number };
 export type UsageLedger = {
   since: number; until: number; prices_configured: boolean;
+  demo?: boolean; spend_usd?: number;
   summary: { first_run: { runs: number; measured_runs: number; measured_hours: number }; rerun: { runs: number; measured_runs: number; measured_hours: number }; unmeasured_runs: number; unmetered_dataset_jobs: number };
   items: UsageRun[]; next_cursor: string | null;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  if (DEMO_MODE) return demoRequest<T>(path, init);
   let response: Response;
   try {
     response = await fetch(`/qc-api${path}`, {

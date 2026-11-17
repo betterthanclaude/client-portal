@@ -4,6 +4,10 @@ This is a working **local, single-workspace development service**, not a public
 multi-user deployment. It runs alongside the existing reference-only QC API.
 The frontend's existing sign-in screen remains a UI demo, not authentication.
 
+The frontend currently opens in MVP demo mode. Set `VITE_DEMO_MODE=false` in
+`.env.local` and restart Vite to use this service. Otherwise all workspace actions
+use sample data saved in the browser and no requests reach this server.
+
 ## Run on this Windows workspace
 
 Dependencies are installed in `D:/kanook/.venv`; DATA-INGEST's environment was not changed.

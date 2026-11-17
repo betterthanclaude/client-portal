@@ -3,6 +3,7 @@ import { ProjectUploads } from "./ProjectUploads";
 import { ProjectMembers } from "./ProjectMembers";
 import { ApiPage } from "./ApiPage";
 import { ProjectsPage } from "./ProjectsPage";
+import { DEMO_MODE } from '../lib/demo';
 import { acceptInvitation, createProject, getProject, listProjects, type Member, type WorkspaceProject } from "../lib/workspace-api";
 
 const NAV = [
@@ -14,6 +15,7 @@ const NAV = [
   { id: "Settings", label: "Settings" },
   { id: "Support", label: "Support" },
 ] as const;
+const PROJECT_STORAGE_KEY = DEMO_MODE ? 'kanook-demo-project' : 'kanook-project';
 
 const NAV_PATHS: Record<(typeof NAV)[number]["id"], string> = {
   Home: "m3 10 9-7 9 7v10H3Z M9 20v-7h6v7",
@@ -48,7 +50,7 @@ export function HomePage() {
 
   function rememberProject(selected: WorkspaceProject) {
     setProject(selected);
-    localStorage.setItem('kanook-project', selected.id);
+    localStorage.setItem(PROJECT_STORAGE_KEY, selected.id);
     setProjects((current) => current.some((item) => item.id === selected.id) ? current.map((item) => item.id === selected.id ? { ...item, ...selected } : item) : [selected, ...current]);
   }
 
@@ -79,13 +81,13 @@ export function HomePage() {
           setProjectName(invitation);
           return;
         }
-        const selected = localStorage.getItem("kanook-project");
+        const selected = localStorage.getItem(PROJECT_STORAGE_KEY);
         if (selected && result.items.some((item) => item.id === selected)) {
           const detail = await getProject(selected);
-          if (active) { setProject(detail); setMembers(detail.members); }
+          if (active && window.location.hash !== '#home') { setProject(detail); setMembers(detail.members); }
         }
         if (active && !window.location.hash) {
-          const initial = result.items.length > 0 ? 'projects' : 'home';
+          const initial = result.items.length > 0 && (!DEMO_MODE || selected) ? 'projects' : 'home';
           window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${initial}`);
           setRoute(initial);
         }
@@ -103,7 +105,7 @@ export function HomePage() {
       const detail = await getProject(selected.id);
       setProject(detail);
       setMembers(detail.members);
-      localStorage.setItem("kanook-project", selected.id);
+      localStorage.setItem(PROJECT_STORAGE_KEY, selected.id);
       setNotice(null);
       setInviting(false);
       navigate(`projects/${selected.id}/requirements`);
@@ -128,7 +130,7 @@ export function HomePage() {
       setProject(detail);
       setMembers(detail.members);
       setProjects((current) => [result, ...current.filter((item) => item.id !== result.id)]);
-      localStorage.setItem("kanook-project", result.id);
+      localStorage.setItem(PROJECT_STORAGE_KEY, result.id);
       if (mode === "join") window.history.replaceState(null, "", window.location.pathname);
       setInviting(showInvites);
       requestAnimationFrame(() => document.getElementById(showInvites ? "member-email" : "project-heading")?.focus());
@@ -202,13 +204,14 @@ export function HomePage() {
       </aside>
 
       <div className="workspace">
+        {DEMO_MODE && <div className="demo-banner"><span><i aria-hidden="true" />Demo workspace</span><span>Sample data · no charges</span></div>}
         {page === 'Api' ? loading ? <main className="home page-main"><p role="status">Loading workspace…</p></main> : <ApiPage project={project} projects={projects} tab={route === 'api/keys' ? 'keys' : 'usage'} navigate={navigate} /> : page === 'Projects' ? <ProjectsPage key={route} projects={projects} projectId={route.split('/')[1]} section={route.split('/')[2]} loading={loading} error={notice} navigate={navigate} refresh={() => void refreshProjects()} onProject={rememberProject} /> :
-        <main className={project ? "home project-home" : "home"}>
+        <main className={project ? "home project-home" : "home home-start"}>
           {!project ? (
             <>
               <div className="welcome welcome-plain">
                 <h1>Welcome, Magan</h1>
-                <p>Let’s get started, create your first project below</p>
+                <p>A little structure for your next big idea.<br />Create a project or pick up where you left off.</p>
               </div>
               <section className="start-card">
                 <h2>{mode === "join" ? "Have a project invitation?" : "What is your project called?"}</h2>
@@ -230,7 +233,7 @@ export function HomePage() {
                 </div>
                 <p className="optional-note">Inviting people is optional. You can add them later.</p>
               </section>
-              {projects.length > 0 && <section className="recent-projects" aria-label="Recent projects"><p>Or continue a project</p>{projects.map((item) => <button key={item.id} type="button" className="outline-btn" disabled={busy} onClick={() => void selectProject(item)}>{item.name} <span aria-hidden="true">↗</span></button>)}</section>}
+              {projects.length > 0 && <section className="recent-projects" aria-label="Recent projects"><p>Or continue a project</p>{projects.slice(0, 3).map((item) => <button key={item.id} type="button" className="outline-btn" disabled={busy} onClick={() => void selectProject(item)}>{item.name} <span aria-hidden="true">↗</span></button>)}</section>}
               {notice && <p className="home-note status-line" role="status">{notice}</p>}
             </>
           ) : (
@@ -239,7 +242,7 @@ export function HomePage() {
                 <p className="project-eyebrow">Project</p>
                 <h1 id="project-heading" tabIndex={-1}>{project.name}</h1>
                 <nav className="project-breadcrumb" aria-label="Breadcrumb">
-                  <button type="button" disabled={busy} onClick={() => { setProject(null); setProjectName(""); setMode("name"); setMembers([]); setInviting(false); localStorage.removeItem("kanook-project"); }}>Home</button><span aria-hidden="true">/</span><strong>Upload files</strong>
+                  <button type="button" disabled={busy} onClick={() => { setProject(null); setProjectName(""); setMode("name"); setMembers([]); setInviting(false); localStorage.removeItem(PROJECT_STORAGE_KEY); }}>Home</button><span aria-hidden="true">/</span><strong>Upload files</strong>
                 </nav>
               </div>
               <div className="project-team">

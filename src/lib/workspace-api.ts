@@ -1,4 +1,5 @@
 import type { IssuedKey } from "./qc-api";
+import { DEMO_MODE, demoRequest } from './demo.ts';
 
 export type ProjectRequirements = {
   mode: 'structured' | 'notes';
@@ -15,6 +16,7 @@ export type StoredFile = { id: string; name: string; size: number; source: "devi
 export type S3Connection = { id: string; bucket: string; prefix: string; indexed: number; next_cursor: string | null };
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  if (DEMO_MODE) return demoRequest<T>(path, init);
   let response: Response;
   try {
     response = await fetch(`/workspace${path}`, {
@@ -45,6 +47,10 @@ export const connectBucket = (id: string, data: { bucket_url: string; region: st
 export const indexBucket = (id: string, connection: string, cursor: string) => request<Pick<S3Connection, "indexed" | "next_cursor">>(`/projects/${id}/s3/${connection}/index`, { method: "POST", body: JSON.stringify({ cursor }) });
 
 export function uploadFile(projectId: string, file: File, onProgress: (percent: number) => void, signal: AbortSignal) {
+  if (DEMO_MODE) {
+    if (signal.aborted) return Promise.reject(new Error('Upload cancelled.'));
+    return demoRequest<StoredFile>(`/projects/${projectId}/files`, { method: 'POST', body: JSON.stringify({ name: file.name, size: file.size }) }).then((stored) => { onProgress(100); return stored; });
+  }
   return new Promise<StoredFile>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const abort = () => xhr.abort();
