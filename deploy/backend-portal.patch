@@ -1,0 +1,489 @@
+diff --git a/deploy/gcp/main.tf b/deploy/gcp/main.tf
+index c7da7f5..1bcc747 100644
+--- a/deploy/gcp/main.tf
++++ b/deploy/gcp/main.tf
+@@ -233,6 +233,10 @@ resource "google_cloud_run_v2_service" "control" {
+         name  = "ORUEL_CONSOLE_ORIGIN"
+         value = var.regional.origin
+       }
++      env {
++        name  = "ORUEL_PORTAL_ORIGINS"
++        value = join(",", var.portal_origins)
++      }
+       env {
+         name  = "ORUEL_REPORT_VIEWERS"
+         value = jsonencode(var.report_viewers)
+diff --git a/deploy/gcp/workspace.tf b/deploy/gcp/workspace.tf
+index 6981c13..bd15a31 100644
+--- a/deploy/gcp/workspace.tf
++++ b/deploy/gcp/workspace.tf
+@@ -8,7 +8,7 @@ resource "google_storage_bucket" "workspace" {
+   force_destroy               = false
+   versioning { enabled = true }
+   cors {
+-    origin          = [var.regional.origin]
++    origin          = distinct(concat([var.regional.origin], var.portal_origins))
+     method          = ["GET", "PUT", "POST", "HEAD"]
+     response_header = ["Content-Type", "x-goog-resumable", "x-goog-meta-sha256"]
+     max_age_seconds = 3600
+diff --git a/docs-magan/README.md b/docs-magan/README.md
+index 59f149b..84bb5a2 100644
+--- a/docs-magan/README.md
++++ b/docs-magan/README.md
+@@ -23,6 +23,8 @@ need a separate record.
+ 
+ ## Index
+ 
++- 2026-11-19 - data-ingest - [Regional client portal integration](2026-11-19-data-ingest-client-portal.md) - Prepared schema 16, project settings/key management, private grievances, idempotent project run associations, and explicit browser portal origins. Ten local portal integration tests passed. No production deployment or migration was run.
++
+ - 2026-11-17 - data-ingest - [Kanook production intake port](2026-11-17-data-ingest-kanook-production-intake.md) - Ported the `D:/kanook` UI/intake boundary to the `kanook-0` deployment checkout with migration 15 project persistence, authenticated project routes, scoped upload keys, resumable GCS upload verification, S3 page indexing, and `/app` packaging. Focused local smoke checks and frontend type/build checks passed; no GCP deployment was run. Remaining release inputs are the workspace bucket name, SMTP secrets, and a delegated-read contract for streaming S3 references.
+ 
+ - 2026-11-14 - data-ingest - [Kanook console, usage ledger and tenant report viewer](2026-11-14-data-ingest-kanook-console.md) - Implemented first-run/rerun input-hour ledger, both console redesigns, shared configurable reports served in the tenant project, native-first customer guide, and additive HTTPS hostname migration. Qualified PostgreSQL and packaged report access, migrated the live database to schema 14, and completed a metered native/external-inference Kanook canary. Browser acceptance caught and fixed an embedded report-form permission and PostgreSQL numeric serialization in admin usage. Deployment receipts and restricted-pilot limits are recorded in the linked entry.
+diff --git a/oruel/service/account_boundary.py b/oruel/service/account_boundary.py
+index 98de196..78853fb 100644
+--- a/oruel/service/account_boundary.py
++++ b/oruel/service/account_boundary.py
+@@ -38,9 +38,10 @@ def bearer(headers):
+ 
+ 
+ class AccountBoundary:
+-    def __init__(self, app, store, origin, cookie_name, auth_rate_limit_secret):
++    def __init__(self, app, store, origin, cookie_name, auth_rate_limit_secret, portal_origins=()):
+         self.app, self.store, self.origin, self.cookie_name = app, store, origin, cookie_name
+         self.auth_rate_limit_secret = auth_rate_limit_secret
++        self.browser_origins = frozenset((origin, *portal_origins))
+ 
+     def _public_rate_scope(self, scope):
+         client = scope.get('client')
+@@ -54,7 +55,7 @@ class AccountBoundary:
+         if scope['method'] not in {'GET', 'HEAD', 'OPTIONS'}:
+             origins = [v.decode('ascii', errors='replace') for k, v in headers if k.lower() == b'origin']
+             csrf = [v for k, v in headers if k.lower() == b'x-csrf-token']
+-            if origins != [self.origin] or len(csrf) != 1 or not hmac.compare_digest(csrf[0], session['csrf'].encode('ascii')):
++            if len(origins) != 1 or origins[0] not in self.browser_origins or len(csrf) != 1 or not hmac.compare_digest(csrf[0], session['csrf'].encode('ascii')):
+                 raise ServiceError(403, 'csrf_check_failed')
+         scope['headers'] = [(k, v) for k, v in headers if k.lower() != b'authorization'] + [
+             (b'authorization', ('Bearer '+token).encode())]
+@@ -76,7 +77,7 @@ class AccountBoundary:
+         if path in PUBLIC:
+             if scope['method'] != 'GET':
+                 origins = [v.decode('ascii', errors='replace') for k, v in scope['headers'] if k.lower() == b'origin']
+-                if origins != [self.origin]:
++                if len(origins) != 1 or origins[0] not in self.browser_origins:
+                     raise ServiceError(403, 'origin_not_permitted')
+             await run_in_threadpool(self.store.rate_limit, self._public_rate_scope(scope), 60)
+             return None
+diff --git a/oruel/service/account_permissions.py b/oruel/service/account_permissions.py
+index ff6d099..893d2f9 100644
+--- a/oruel/service/account_permissions.py
++++ b/oruel/service/account_permissions.py
+@@ -15,6 +15,13 @@ ROLES = {
+ 
+ # Match the entire decoded path. No query strings, job IDs or raw paths enter logs.
+ RULES = (
++    ('PATCH', r'/workspace/projects/[A-Za-z0-9_-]+', 'workspace:manage'),
++    ('GET', r'/workspace/projects/[A-Za-z0-9_-]+/api-keys', 'workspace:manage'),
++    ('DELETE', r'/workspace/projects/[A-Za-z0-9_-]+/api-keys/[A-Za-z0-9_-]+', 'workspace:manage'),
++    ('GET', r'/workspace/projects/[A-Za-z0-9_-]+/runs', 'workspace:read'),
++    ('POST', r'/workspace/projects/[A-Za-z0-9_-]+/runs', 'workspace:manage'),
++    ('GET', r'/workspace/grievances', 'workspace:read'),
++    ('POST', r'/workspace/grievances', 'workspace:read'),
+     ('GET', r'/account/v1/provider-consents', 'inference:manage'),
+     ('PUT', r'/account/v1/provider-consents/[A-Za-z0-9_-]+', 'inference:manage'),
+     ('DELETE', r'/account/v1/provider-consents/[A-Za-z0-9_-]+', 'inference:manage'),
+diff --git a/oruel/service/account_store.py b/oruel/service/account_store.py
+index 382dbb4..a9db88d 100644
+--- a/oruel/service/account_store.py
++++ b/oruel/service/account_store.py
+@@ -19,6 +19,7 @@ from .batch_isolation import SCHEMA as BATCH_ISOLATION_SCHEMA, initialize_projec
+ from .run_usage import SCHEMA as RUN_USAGE_SCHEMA, backfill_runs, extensions_ready, register_run
+ from .report_access import SCHEMA as REPORT_ACCESS_SCHEMA
+ from .workspace_schema import SCHEMA as WORKSPACE_SCHEMA
++from .portal_schema import SCHEMA as PORTAL_SCHEMA
+ 
+ 
+ class Accounts(AccountAccess, AccountKeys, AccountSessions, AccountTeam, ProductionControls, GatewayAccounts,
+@@ -93,7 +94,8 @@ class RegionalStore(Accounts, ControlStore):
+             db.executescript(BATCH_ISOLATION_SCHEMA)
+             db.executescript(RUN_USAGE_SCHEMA)
+             db.executescript(REPORT_ACCESS_SCHEMA)
+-            db.executescript(WORKSPACE_SCHEMA)
++            db.executescript(WORKSPACE_SCHEMA.replace('CREATE TABLE ', 'CREATE TABLE IF NOT EXISTS ').replace('CREATE INDEX ', 'CREATE INDEX IF NOT EXISTS '))
++            db.executescript(PORTAL_SCHEMA)
+             initialize_projects(db)
+             columns = {row['name'] for row in db.execute('PRAGMA table_info(control_invitations)')}
+             if 'inviter_id' not in columns:
+diff --git a/oruel/service/postgres_schema.py b/oruel/service/postgres_schema.py
+index ade7aff..28c403a 100644
+--- a/oruel/service/postgres_schema.py
++++ b/oruel/service/postgres_schema.py
+@@ -134,3 +134,5 @@ MIGRATIONS += ((14, RUN_USAGE_SCHEMA + REPORT_ACCESS_SCHEMA),)
+ 
+ from .workspace_schema import SCHEMA as WORKSPACE_SCHEMA
+ MIGRATIONS += ((15, WORKSPACE_SCHEMA),)
++from .portal_schema import SCHEMA as PORTAL_SCHEMA
++MIGRATIONS += ((16, PORTAL_SCHEMA),)
+diff --git a/oruel/service/regional_api.py b/oruel/service/regional_api.py
+index 032bccf..94da448 100644
+--- a/oruel/service/regional_api.py
++++ b/oruel/service/regional_api.py
+@@ -1,5 +1,6 @@
+ """Metadata-only account console alongside the existing customer job API."""
+ from pathlib import Path
++import os
+ import secrets
+ from urllib.parse import urlsplit
+ 
+@@ -85,8 +86,12 @@ def register_static(app, google_enabled):
+ 
+ 
+ def create_app(store, *, origin='http://127.0.0.1:8780', secure_cookies=True, google_verifier=None,
+-               auth_rate_limit_secret=None, report_viewers=None, allowed_hosts=None):
++               auth_rate_limit_secret=None, report_viewers=None, allowed_hosts=None, portal_origins=None):
+     parsed = validate_origin(origin, secure_cookies)
++    portal_origins = tuple(portal_origins if portal_origins is not None else
++                           filter(None, os.environ.get('ORUEL_PORTAL_ORIGINS', '').split(',')))
++    for portal_origin in portal_origins:
++        validate_origin(portal_origin, secure_cookies)
+     rate_secret = auth_rate_secret(parsed, auth_rate_limit_secret)
+     hosts = [parsed.hostname, *(allowed_hosts or [])]
+     app = job_app(store, allowed_hosts=hosts)
+@@ -126,9 +131,11 @@ def create_app(store, *, origin='http://127.0.0.1:8780', secure_cookies=True, go
+     from .report_access import register_reports
+     register_reports(app, store, customer, origin, report_viewers or {})
+     register_workspace(app, store, customer, origin)
++    from .portal_routes import register_portal
++    register_portal(app, store, customer)
+     register_operator(app, store)
+     app.add_middleware(AccountBoundary, store=store, origin=origin, cookie_name=app.state.cookie_name,
+-                       auth_rate_limit_secret=rate_secret)
++                       auth_rate_limit_secret=rate_secret, portal_origins=portal_origins)
+     app.add_middleware(OperatorBoundary, store=store, origin=origin, cookie_name=app.state.operator_cookie,
+                        auth_rate_limit_secret=rate_secret)
+     register_canonical_console(app, origin, parsed.hostname)
+diff --git a/oruel/service/workspace_routes.py b/oruel/service/workspace_routes.py
+index 8ae3215..5d3524b 100644
+--- a/oruel/service/workspace_routes.py
++++ b/oruel/service/workspace_routes.py
+@@ -45,6 +45,7 @@ class InvitationBody(BaseModel):
+ 
+ class KeyBody(BaseModel):
+     lifetime_hours: int = Field(default=24, ge=1, le=720)
++    name: str = Field(default='Upload key', min_length=1, max_length=80)
+ 
+ 
+ class S3Body(BaseModel):
+@@ -237,10 +238,15 @@ def _index_s3(store, principal, project_id, body, cursor=None):
+ def register_workspace(app, store, customer, origin):
+     @app.get('/workspace/projects')
+     def projects(principal=Depends(customer)):
+-        return {'items': _rows(store, '''SELECT p.id,p.name,p.created FROM control_projects p
++        from .portal_routes import project_metadata
++        rows = _rows(store, '''SELECT p.id,p.name,p.created,
++            (SELECT COUNT(*) FROM control_project_files f WHERE f.org=p.org AND f.project_id=p.id AND f.status='COMPLETE') AS file_count,
++            (SELECT COUNT(*) FROM control_project_invitations i WHERE i.org=p.org AND i.project_id=p.id) AS invitation_count
++            FROM control_projects p
+             JOIN control_project_members m ON m.org=p.org AND m.project_id=p.id
+             WHERE p.org=? AND m.member_id=? ORDER BY p.created DESC''',
+-            (principal.organization, _account(store, principal)['member_id']))}
++            (principal.organization, _account(store, principal)['member_id']))
++        return {'items': [dict(row, **project_metadata(store, principal, row['id'])) for row in rows]}
+ 
+     @app.post('/workspace/projects', status_code=201)
+     def create_project(body: ProjectBody, principal=Depends(customer)):
+@@ -253,17 +259,20 @@ def register_workspace(app, store, customer, origin):
+                 (project['org'], project['id'], project['name'], project['owner_member_id'], project['created']))
+             db.execute('INSERT INTO control_project_members VALUES (?,?,?,?,?)',
+                        (project['org'], project['id'], account['member_id'], 'owner', project['created']))
+-        return {key: project[key] for key in ('id', 'name', 'created')}
++        return {key: project[key] for key in ('id', 'name', 'created')} | {'status': 'ongoing'}
+ 
+     @app.get('/workspace/projects/{project_id}')
+     def project(project_id: str, principal=Depends(customer)):
++        from .portal_routes import project_metadata
+         _member(store, principal, project_id)
+         result = _project(store, principal, project_id)
+         result['members'] = _rows(store, '''SELECT m.id,m.email,pm.role,pm.created FROM control_project_members pm
+             JOIN control_members m ON m.org=pm.org AND m.id=pm.member_id WHERE pm.org=? AND pm.project_id=?
+             ORDER BY pm.created''', (principal.organization, project_id))
+         result['files'] = _files(store, principal, project_id)
+-        return {key: result[key] for key in ('id', 'name', 'created', 'members', 'files')}
++        for member in result['members']:
++            member['status'] = 'accepted'
++        return {key: result[key] for key in ('id', 'name', 'created', 'members', 'files')} | project_metadata(store, principal, project_id)
+ 
+     @app.post('/workspace/projects/{project_id}/invitations', status_code=201)
+     def invite(project_id: str, body: InvitationBody, principal=Depends(customer)):
+@@ -381,4 +390,6 @@ def register_workspace(app, store, customer, origin):
+                 store.clock()+body.lifetime_hours*3600, store.clock(), 0)
+         with store._connect(write=True, organization=principal.organization) as db:
+             db.execute('INSERT INTO control_project_upload_keys VALUES (?,?,?,?,?,?,?)', item)
++            db.execute('INSERT INTO control_project_key_labels VALUES (?,?,?)',
++                       (principal.organization, item[1], body.name))
+         return {'id': item[1], 'token': token, 'expires': item[4], 'shown_once': True, 'scope': 'project_upload'}
+diff --git a/oruel/service/portal_routes.py b/oruel/service/portal_routes.py
+new file mode 100644
+index 0000000..f479d3f
+--- /dev/null
++++ b/oruel/service/portal_routes.py
+@@ -0,0 +1,171 @@
++"""Authenticated project settings, QC dispatch, and durable grievance receipts."""
++import hashlib
++import json
++import uuid
++from typing import Annotated, Literal
++
++from fastapi import Depends, HTTPException
++from pydantic import Field, field_validator
++
++from .api import IdempotencyKey, Message
++from .production_routes import RegionalQcSubmission, submit_dataset_with_budget
++from .workspace_routes import _member, _rows, _files
++
++Weight = Annotated[float, Field(ge=0, le=100)]
++
++
++class Components(Message):
++    visual_similarity: Weight | None = None
++    label_balance: Weight | None = None
++
++
++class VisualWeights(Message):
++    context: Weight | None = None
++    temporal: Weight | None = None
++    layout: Weight | None = None
++    family: Weight | None = None
++    scene: Weight | None = None
++
++
++class LabelTarget(Message):
++    label: str = Field(min_length=1, max_length=100)
++    target: Weight
++
++
++class Requirements(Message):
++    mode: Literal['structured', 'notes']
++    component_weights: Components
++    visual_similarity: VisualWeights
++    label_balance: list[LabelTarget] = Field(max_length=50)
++    notes: str = Field(max_length=10000)
++
++    @field_validator('label_balance')
++    @classmethod
++    def total(cls, value):
++        if sum(item.target for item in value) > 100.000001:
++            raise ValueError('label targets must total at most 100')
++        return value
++
++
++class Configuration(Message):
++    target_score: Weight | None = None
++    selected_file_ids: list[str] | None = Field(default=None, max_length=10000)
++
++
++class ProjectChange(Message):
++    status: Literal['ongoing', 'completed'] | None = None
++    requirements: Requirements | None = None
++    configuration: Configuration | None = None
++
++
++class GrievanceBody(Message):
++    category: Literal['technical', 'billing', 'data', 'access', 'other']
++    subject: str = Field(min_length=3, max_length=160)
++    description: str = Field(min_length=20, max_length=10000)
++    project_id: str | None = Field(default=None, max_length=64)
++
++    @field_validator('subject', 'description')
++    @classmethod
++    def nonblank(cls, value):
++        if not value.strip():
++            raise ValueError('must not be blank')
++        return value.strip()
++
++
++def project_metadata(store, principal, project_id):
++    rows = _rows(store, 'SELECT settings,updated FROM control_project_settings WHERE org=? AND project_id=?',
++                 (principal.organization, project_id))
++    settings = json.loads(rows[0]['settings']) if rows else {}
++    return dict(status='ongoing', requirements=None,
++                configuration={'target_score': None, 'selected_file_ids': None}
++                ) | settings | {'updated': rows[0]['updated'] if rows else None}
++
++
++def register_portal(app, store, customer):
++    @app.patch('/workspace/projects/{project_id}', tags=['Workspace'])
++    def update_project(project_id: str, body: ProjectChange, principal=Depends(customer)):
++        with store.organization_transaction(principal.organization) as db:
++            _member(store, principal, project_id, write=True)
++            if body.configuration and body.configuration.selected_file_ids is not None:
++                allowed = {item['id'] for item in _files(store, principal, project_id)}
++                if not set(body.configuration.selected_file_ids) <= allowed:
++                    raise HTTPException(422, 'Selection contains files outside this project.')
++            settings = project_metadata(store, principal, project_id)
++            settings.pop('updated', None)
++            settings.update({key: value for key, value in body.model_dump(exclude_unset=True).items()
++                             if value is not None})
++            db.execute('''INSERT INTO control_project_settings VALUES (?,?,?,?)
++                ON CONFLICT(org,project_id) DO UPDATE SET settings=excluded.settings,updated=excluded.updated''',
++                (principal.organization, project_id, json.dumps(settings), store.clock()))
++        return {'id': project_id, **project_metadata(store, principal, project_id)}
++
++    @app.get('/workspace/projects/{project_id}/api-keys', tags=['Workspace'])
++    def project_keys(project_id: str, principal=Depends(customer)):
++        _member(store, principal, project_id, write=True)
++        return {'items': _rows(store, '''SELECT k.id,k.created,k.expires,k.revoked,
++            COALESCE(n.name,'Upload key') AS name, NULL AS last_used
++            FROM control_project_upload_keys k LEFT JOIN control_project_key_labels n
++            ON n.org=k.org AND n.key_id=k.id WHERE k.org=? AND k.project_id=? ORDER BY k.created DESC''',
++            (principal.organization, project_id))}
++
++    @app.delete('/workspace/projects/{project_id}/api-keys/{key_id}', tags=['Workspace'])
++    def revoke_project_key(project_id: str, key_id: str, principal=Depends(customer)):
++        _member(store, principal, project_id, write=True)
++        with store._connect(write=True, organization=principal.organization) as db:
++            db.execute('UPDATE control_project_upload_keys SET revoked=1 WHERE org=? AND project_id=? AND id=?',
++                       (principal.organization, project_id, key_id))
++        return {'revoked': True}
++
++    register_project_runs(app, store, customer)
++    register_grievances(app, store, customer)
++
++
++def register_project_runs(app, store, customer):
++    @app.post('/workspace/projects/{project_id}/runs', status_code=202, tags=['Workspace'])
++    def dispatch(project_id: str, body: RegionalQcSubmission, key: IdempotencyKey, principal=Depends(customer)):
++        with store.organization_transaction(principal.organization) as db:
++            _member(store, principal, project_id, write=True)
++            store.authorize(principal, 'jobs:write')
++            job = submit_dataset_with_budget(store, principal, body, key, 'portal-qc:'+project_id)
++            db.execute('''INSERT INTO control_project_runs VALUES (?,?,?,?)
++                ON CONFLICT(org,project_id,job_id) DO NOTHING''',
++                (principal.organization, project_id, job['id'], store.clock()))
++        return job
++
++    @app.get('/workspace/projects/{project_id}/runs', tags=['Workspace'])
++    def runs(project_id: str, principal=Depends(customer)):
++        _member(store, principal, project_id)
++        rows = _rows(store, '''SELECT job_id FROM control_project_runs WHERE org=? AND project_id=?
++            ORDER BY created DESC LIMIT 50''', (principal.organization, project_id))
++        return {'items': [store.dataset_job(principal, row['job_id']) for row in rows]}
++
++
++def grievance_receipt(row):
++    return {key: row[key] for key in ('id', 'subject', 'category', 'status', 'created')}
++
++
++def register_grievances(app, store, customer):
++    @app.get('/workspace/grievances', tags=['Support'])
++    def grievances(principal=Depends(customer)):
++        account = store.account(principal)
++        rows = _rows(store, '''SELECT * FROM control_grievances WHERE org=? AND member_id=?
++            ORDER BY created DESC LIMIT 100''', (principal.organization, account['member_id']))
++        return {'items': [grievance_receipt(row) for row in rows]}
++
++    @app.post('/workspace/grievances', status_code=201, tags=['Support'])
++    def submit(body: GrievanceBody, key: IdempotencyKey, principal=Depends(customer)):
++        account = store.account(principal)
++        if body.project_id:
++            _member(store, principal, body.project_id)
++        digest = hashlib.sha256(body.model_dump_json().encode()).hexdigest()
++        with store.organization_transaction(principal.organization) as db:
++            db.execute('''INSERT INTO control_grievances VALUES (?,?,?,?,?,?,?,'open',?,?,?)
++                ON CONFLICT(org,member_id,request_key) DO NOTHING''',
++                (principal.organization, uuid.uuid4().hex, account['member_id'], body.project_id,
++                 body.subject, body.category, body.description, store.clock(), key, digest))
++            row = db.execute('''SELECT * FROM control_grievances
++                WHERE org=? AND member_id=? AND request_key=?''',
++                (principal.organization, account['member_id'], key)).fetchone()
++            if row['payload_hash'] != digest:
++                raise HTTPException(409, 'This request key was already used for a different grievance.')
++        return grievance_receipt(row)
+diff --git a/oruel/service/portal_schema.py b/oruel/service/portal_schema.py
+new file mode 100644
+index 0000000..fb51607
+--- /dev/null
++++ b/oruel/service/portal_schema.py
+@@ -0,0 +1,26 @@
++"""Additive metadata for the customer portal; compatible with migration 15."""
++SCHEMA = """
++CREATE TABLE IF NOT EXISTS control_project_settings (
++    org TEXT NOT NULL, project_id TEXT NOT NULL, settings TEXT NOT NULL,
++    updated DOUBLE PRECISION NOT NULL, PRIMARY KEY (org, project_id),
++    FOREIGN KEY (org, project_id) REFERENCES control_projects(org, id)
++);
++CREATE TABLE IF NOT EXISTS control_project_key_labels (
++    org TEXT NOT NULL, key_id TEXT NOT NULL, name TEXT NOT NULL,
++    PRIMARY KEY (org, key_id),
++    FOREIGN KEY (org, key_id) REFERENCES control_project_upload_keys(org, id)
++);
++CREATE TABLE IF NOT EXISTS control_grievances (
++    org TEXT NOT NULL, id TEXT NOT NULL, member_id TEXT NOT NULL, project_id TEXT,
++    subject TEXT NOT NULL, category TEXT NOT NULL, description TEXT NOT NULL,
++    status TEXT NOT NULL DEFAULT 'open', created DOUBLE PRECISION NOT NULL,
++    request_key TEXT NOT NULL, payload_hash TEXT NOT NULL,
++    PRIMARY KEY (org, id), UNIQUE (org, member_id, request_key),
++    FOREIGN KEY (member_id) REFERENCES control_members(id)
++);
++CREATE TABLE IF NOT EXISTS control_project_runs (
++    org TEXT NOT NULL, project_id TEXT NOT NULL, job_id TEXT NOT NULL,
++    created DOUBLE PRECISION NOT NULL, PRIMARY KEY (org, project_id, job_id),
++    FOREIGN KEY (org, project_id) REFERENCES control_projects(org, id)
++);
++"""
+diff --git a/deploy/gcp/portal.tf b/deploy/gcp/portal.tf
+new file mode 100644
+index 0000000..da617c3
+--- /dev/null
++++ b/deploy/gcp/portal.tf
+@@ -0,0 +1,11 @@
++variable "portal_origins" {
++  description = "Exact HTTPS client portal origins allowed for browser sessions and direct storage uploads."
++  type        = list(string)
++  default     = []
++  validation {
++    condition = alltrue([
++      for origin in var.portal_origins : can(regex("^https://[A-Za-z0-9.-]+(:[0-9]+)?$", origin))
++    ])
++    error_message = "Portal origins must be exact HTTPS origins, without paths, wildcards, or trailing slashes."
++  }
++}
+diff --git a/docs-magan/2026-11-19-data-ingest-client-portal.md b/docs-magan/2026-11-19-data-ingest-client-portal.md
+new file mode 100644
+index 0000000..e65f397
+--- /dev/null
++++ b/docs-magan/2026-11-19-data-ingest-client-portal.md
+@@ -0,0 +1,34 @@
++# Regional client portal integration
++
++## Context
++The Kanook frontend needs the existing account and QC boundary, persistent
++project configuration, key management, support grievances and project run history.
++
++## What we did
++Prepared migration 16 for project settings, key labels, private grievances and
++project/job associations. Added validated routes using existing membership and
++permission checks. Added an explicit portal-origin allowlist and corresponding
++Terraform/storage CORS configuration. These changes are local and undeployed.
++
++## How
++Reused account sessions and CSRF, project-scoped keys, transactional QC submission,
++and regional storage. Stable idempotency keys deduplicate grievance and job
++retries. Exact portal origins extend only the browser account boundary; operator
++authentication is unchanged. Migration 15 is not rewritten.
++
++## Why
++A separate authentication service and shared browser API key would duplicate or
++weaken the deployed boundary. Reusing QC submission preserves enrollment,
++execution and pricing behavior. Raw uploads are not implicitly QC datasets.
++
++## Architecture
++Browser -> regional account/CSRF -> authorized project routes -> regional store.
++Project dispatch -> existing QC submission -> existing workers. File bytes go
++directly to GCS using the existing resumable intake contract.
++
++## Open questions
++The portal's ten in-process integration tests pass using disposable local stores;
++the deployment/PostgreSQL gates have not been run. Release requires the real
++GCP target, schema migration, exact portal origin, bucket/SMTP configuration and
++worker enrollment. Grievances persist but need an operator triage surface.
++Automatic intake-to-manifest translation remains a separate API requirement.

@@ -2,7 +2,8 @@ import type { IssuedKey, QcKey, UsageLedger, UsageRun } from './qc-api.ts';
 import type { Member, ProjectRequirements, StoredFile, UploadKey, WorkspaceProject } from './workspace-api.ts';
 
 // Explicit MVP mode, never an automatic fallback for a failed production request.
-export const DEMO_MODE = typeof window !== 'undefined' && import.meta.env?.VITE_DEMO_MODE !== 'false';
+const demoOverride = typeof window !== 'undefined' ? new URLSearchParams(window.location?.search ?? '').get('demo') : null;
+export const DEMO_MODE = typeof window !== 'undefined' && (demoOverride === '1' || (demoOverride !== '0' && import.meta.env?.VITE_DEMO_MODE === 'true'));
 export const DEMO_STORAGE_KEY = 'kanook-mvp-workspace-v1';
 type Detail = WorkspaceProject & { members: Member[]; files: StoredFile[] };
 type DemoState = { projects: Detail[]; keys: Record<string, UploadKey[]>; qcKeys: QcKey[]; invitations: Record<string, string> };
@@ -108,6 +109,11 @@ export async function demoRequest<T>(path: string, init: RequestInit = {}): Prom
       if (parts[1] === 'connections') return parts[2] ? { id: parts[2], registered: true, storage: 'sample_bucket', worker_readiness: 'demo_only' } : { items: [{ id: 'demo-acme-datasets' }], next_cursor: null };
       if (parts[1] === 'api-keys') {
         if (method === 'GET') return { items: state.qcKeys, next_cursor: null };
+        if (method === 'DELETE') {
+          const key = state.qcKeys.find((item) => item.id === parts[2]);
+          if (!key) throw new Error('Sample key not found.');
+          key.revoked = true; save(state); return { revoked: true };
+        }
         const key = { id: `demo-${uid()}`, name: body.name, scopes: body.scopes, created: now(), expires: now() + body.lifetime_hours * 3600, revoked: false, last_used: null };
         state.qcKeys.unshift(key); save(state);
         return { ...key, token: `demo_not_a_real_key_${uid()}`, shown_once: true, scope: 'organization_client_api' } satisfies IssuedKey;
@@ -144,7 +150,7 @@ export async function demoRequest<T>(path: string, init: RequestInit = {}): Prom
     }
     if (parts[2] === 'invitations') {
       const token = `demo-invite-${uid()}`;
-      const member: Member = { id: uid(), email: body.email, status: 'pending_delivery', invitation_url: `${window.location.origin}/?invitation=${token}` };
+      const member: Member = { id: uid(), email: body.email, status: 'pending_delivery', invitation_url: `${window.location.origin}${window.location.pathname || '/'}?demo=1&invitation=${token}` };
       project.members.push(member); state.invitations[token] = project.id; save(state); return member;
     }
     if (parts[2] === 'files') {
@@ -161,6 +167,11 @@ export async function demoRequest<T>(path: string, init: RequestInit = {}): Prom
     }
     if (parts[2] === 'api-keys') {
       if (method === 'GET') return { items: state.keys[project.id] || [] };
+      if (method === 'DELETE') {
+        const key = state.keys[project.id]?.find((item) => item.id === parts[3]);
+        if (!key) throw new Error('Sample key not found.');
+        key.revoked = true; save(state); return { revoked: true };
+      }
       const key: UploadKey = { id: `demo-upload-${uid()}`, name: body.name, created: now(), last_used: null, expires: now() + body.lifetime_hours * 3600 };
       (state.keys[project.id] ||= []).unshift(key); save(state);
       return { ...key, token: `demo_not_a_real_key_${uid()}`, shown_once: true, scope: 'project_upload' } satisfies IssuedKey;

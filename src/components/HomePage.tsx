@@ -6,28 +6,16 @@ import { ProjectsPage } from "./ProjectsPage";
 import { DEMO_MODE } from '../lib/demo';
 import { acceptInvitation, createProject, getProject, listProjects, type Member, type WorkspaceProject } from "../lib/workspace-api";
 
-const NAV = [
-  { id: "Home", label: "Home" },
-  { id: "Projects", label: "Projects" },
-  { id: "Logs", label: "Logs" },
-  { id: "Api", label: "API" },
-  { id: "Docs", label: "Docs" },
-  { id: "Settings", label: "Settings" },
-  { id: "Support", label: "Support" },
-] as const;
+import { Sidebar } from './Sidebar';
+import { FlowSteps } from './FlowSteps';
+import { DocsPage } from './DocsPage';
+import { SettingsPage } from './SettingsPage';
+import { SupportPage } from './SupportPage';
+import { LogsPage } from './LogsPage';
+import type { Session } from '../lib/http';
 const PROJECT_STORAGE_KEY = DEMO_MODE ? 'kanook-demo-project' : 'kanook-project';
 
-const NAV_PATHS: Record<(typeof NAV)[number]["id"], string> = {
-  Home: "m3 10 9-7 9 7v10H3Z M9 20v-7h6v7",
-  Projects: "M3 7V4h7l2 3h9v13H3Z",
-  Logs: "M5 5h14M5 12h14M5 19h9",
-  Api: "m8 7-5 5 5 5m8-10 5 5-5 5m-3-13-2 16",
-  Docs: "M5 3h9l5 5v13H5ZM14 3v6h5M9 13h6M9 17h6",
-  Settings: "M4 6h16M4 12h16M4 18h16M8 3v6m8 0v6m-6 0v6",
-  Support: "M9 9a3 3 0 1 1 5 2c-1 1-2 1-2 3m0 3h.01 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0",
-};
-
-export function HomePage() {
+export function HomePage({ session, onSignOut, accountNotice }: { session: Session | null; onSignOut?: () => void; accountNotice?: string | null }) {
   const projectInput = useRef<HTMLInputElement>(null);
   const [menuCollapsed, setMenuCollapsed] = useState(() => window.matchMedia("(max-width: 760px)").matches);
   const [mode, setMode] = useState<"name" | "join">("name");
@@ -40,7 +28,8 @@ export function HomePage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [route, setRoute] = useState(() => window.location.hash.slice(1));
-  const page = route.startsWith('api') ? 'Api' : route.startsWith('projects') ? 'Projects' : 'Home';
+  const section = route.split('/')[0];
+  const page = ['api', 'projects', 'docs', 'settings', 'support', 'logs'].includes(section) ? section : 'home';
 
   function navigate(path: string) {
     if (path === 'home') { setProject(null); setProjectName(''); setMode('name'); setMembers([]); setInviting(false); setNotice(null); }
@@ -150,86 +139,35 @@ export function HomePage() {
 
   return (
     <div className={menuCollapsed ? "shell menu-collapsed" : "shell"}>
-      <aside className="side">
-        <div className="side-brand">
-          <p className="side-wordmark">Kanook</p>
-          <button
-            type="button"
-            className="menu-toggle"
-            aria-label={menuCollapsed ? "Expand menu" : "Collapse menu"}
-            title={menuCollapsed ? "Expand menu" : "Collapse menu"}
-            aria-expanded={!menuCollapsed}
-            aria-controls="sidebar-navigation"
-            onClick={() => setMenuCollapsed((collapsed) => !collapsed)}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-              <rect x="3" y="4" width="18" height="16" rx="2" />
-              <path d="M9 4v16" />
-              <path className="collapse-chevron" d="m16 9-3 3 3 3" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="side-content" id="sidebar-navigation">
-        <nav className="side-nav" aria-label="Main">
-          {NAV.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={item.id === page ? "nav-item is-current" : "nav-item"}
-              aria-current={item.id === page ? "page" : undefined}
-              aria-label={item.label}
-              title={menuCollapsed ? item.label : undefined}
-              onClick={() => { if (item.id === 'Home') navigate('home'); else if (item.id === 'Projects') navigate('projects'); else if (item.id === 'Api') navigate('api/usage'); }}
-            >
-              <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d={NAV_PATHS[item.id]} />
-              </svg>
-              <span className="nav-copy">{item.label}</span>
-            </button>
-          ))}
-        </nav>
-
-        <div className="account" title="John Smith · Acme Corporation" aria-label="John Smith, Acme Corporation">
-          <div className="account-copy">
-            <p className="account-name">John Smith</p>
-            <p className="account-org">Acme Corporation</p>
-          </div>
-          <svg className="account-avatar" viewBox="0 0 48 48" aria-hidden="true">
-            <circle cx="24" cy="17" r="9" fill="currentColor" />
-            <path d="M8 48v-5a16 16 0 0 1 32 0v5Z" fill="currentColor" />
-          </svg>
-        </div>
-        </div>
-      </aside>
+      <Sidebar page={page} collapsed={menuCollapsed} toggle={() => setMenuCollapsed((value) => !value)} navigate={navigate} name={session?.email.split('@')[0] || 'Magan'} organization={session?.organization_name || 'Acme Corporation'} onSignOut={onSignOut} />
 
       <div className="workspace">
-        {DEMO_MODE && <div className="demo-banner"><span><i aria-hidden="true" />Demo workspace</span><span>Sample data · no charges</span></div>}
-        {page === 'Api' ? loading ? <main className="home page-main"><p role="status">Loading workspace…</p></main> : <ApiPage project={project} projects={projects} tab={route === 'api/keys' ? 'keys' : 'usage'} navigate={navigate} /> : page === 'Projects' ? <ProjectsPage key={route} projects={projects} projectId={route.split('/')[1]} section={route.split('/')[2]} loading={loading} error={notice} navigate={navigate} refresh={() => void refreshProjects()} onProject={rememberProject} /> :
+        {DEMO_MODE && <div className="demo-banner"><span><i aria-hidden="true" />Demo workspace</span><a href="?demo=0#home">Sample data · Connect your workspace ↗</a></div>}
+        {accountNotice && <p className="page-notice" role="alert">{accountNotice}</p>}
+        {page === 'docs' ? <DocsPage /> : page === 'settings' ? <SettingsPage session={session} navigate={navigate} /> : page === 'support' ? <SupportPage projects={projects} /> : page === 'logs' ? <LogsPage /> : page === 'api' ? loading ? <main className="home page-main"><p role="status">Loading workspace…</p></main> : <ApiPage project={project} projects={projects} tab={route === 'api/keys' ? 'keys' : 'usage'} navigate={navigate} /> : page === 'projects' ? <ProjectsPage key={route} projects={projects} projectId={route.split('/')[1]} section={route.split('/')[2]} loading={loading} error={notice} navigate={navigate} refresh={() => void refreshProjects()} onProject={rememberProject} /> :
         <main className={project ? "home project-home" : "home home-start"}>
           {!project ? (
             <>
               <div className="welcome welcome-plain">
-                <h1>Welcome, Magan</h1>
-                <p>A little structure for your next big idea.<br />Create a project or pick up where you left off.</p>
+                <h1>Welcome, {session?.email.split('@')[0] || 'Magan'}.</h1>
+                <p>Name your project to get started.</p>
               </div>
-              <section className="start-card">
-                <h2>{mode === "join" ? "Have a project invitation?" : "What is your project called?"}</h2>
+              <section className="start-card" aria-label="Start a project">
                 <form className="name-row" onSubmit={(event) => { event.preventDefault(); void nameProject(); }}>
                   <label className="sr" htmlFor="project-name">{mode === "join" ? "Invitation link" : "Enter project name"}</label>
                   <input ref={projectInput} id="project-name" value={projectName} autoComplete="off" maxLength={mode === "join" ? 2048 : 100} disabled={busy || loading}
                     placeholder={mode === "join" ? "Paste invitation link or code" : "Enter Project Name"}
                     onChange={(event) => { setProjectName(event.target.value); setNotice(null); }} />
-                  <button type="submit" className="brown-btn brown-btn-wide" disabled={busy || loading}>{busy ? "Opening…" : mode === "join" ? "Join project" : "continue"}</button>
+                  <button type="submit" className="brown-btn" disabled={busy || loading}>{busy ? "Opening…" : mode === "join" ? "Join project" : "Continue"} <span aria-hidden="true">→</span></button>
                 </form>
                 <div className="split-actions">
-                  <button type="button" className="brown-btn" disabled={busy || loading} onClick={() => {
+                  <button type="button" className="text-hit" disabled={busy || loading} onClick={() => {
                     setMode((current) => current === "join" ? "name" : "join");
                     setProjectName("");
                     setInviting(false);
                     setNotice(null);
                   }}>{mode === "join" ? "Create a project" : "Join a project"}</button>
-                  <button type="button" className="brown-btn" disabled={busy || loading || mode === "join"} onClick={openInvite} aria-expanded={inviting} aria-controls="project-members">Invite members</button>
+                  <button type="button" className="text-hit" disabled={busy || loading || mode === "join"} onClick={openInvite} aria-expanded={inviting} aria-controls="project-members">Invite members <span aria-hidden="true">+</span></button>
                 </div>
                 <p className="optional-note">Inviting people is optional. You can add them later.</p>
               </section>
@@ -256,7 +194,7 @@ export function HomePage() {
 
           {inviting && project && <ProjectMembers projectId={project.id} members={members} onInvite={(member) => setMembers((current) => [...current, member])} onClose={() => setInviting(false)} />}
 
-          {project && <><ProjectUploads key={project.id} projectId={project.id} onUseApi={() => navigate('api/keys')} /><div className="home-continue"><button className="brown-btn" onClick={() => navigate(`projects/${project.id}/requirements`)}>Define requirements <span aria-hidden="true">→</span></button></div></>}
+          {project && <><FlowSteps current={1} projectId={project.id} navigate={navigate} /><ProjectUploads key={project.id} projectId={project.id} onUseApi={() => navigate('api/keys')} /><div className="home-continue"><button className="brown-btn" onClick={() => navigate(`projects/${project.id}/requirements`)}>Define requirements <span aria-hidden="true">→</span></button></div></>}
         </main>
         }
       </div>

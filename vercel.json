@@ -3,5 +3,15 @@
   "framework": "vite",
   "installCommand": "npm ci",
   "buildCommand": "npm run build",
-  "outputDirectory": "dist"
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/account/v1/:path*", "destination": "https://kanook.oru-el.com/account/v1/:path*" },
+    { "source": "/workspace/:path*", "destination": "https://kanook.oru-el.com/workspace/:path*" },
+    { "source": "/qc-api/:path*", "destination": "https://kanook.oru-el.com/:path*" }
+  ],
+  "headers": [
+    { "source": "/account/:path*", "headers": [{ "key": "Cache-Control", "value": "private, no-store" }] },
+    { "source": "/workspace/:path*", "headers": [{ "key": "Cache-Control", "value": "private, no-store" }] },
+    { "source": "/qc-api/:path*", "headers": [{ "key": "Cache-Control", "value": "private, no-store" }] }
+  ]
 }

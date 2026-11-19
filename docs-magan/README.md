@@ -1,5 +1,9 @@
 # Kanook decisions
 
+- 2026-11-19: User clarified the release target is the existing frontend host: `betterthanclaude/client-portal` on `main` for Vercel, rather than the backend's `kanook-0` branch. Prepared the current UI and regional API client changes for that branch; 22 frontend and ten local regional tests plus the production build passed. The backend release remains separate.
+
+- 2026-11-19: Connected the regional session/API clients and prepared backend migration 16 plus project dispatch, settings, key management, generated docs and grievance support. Restored a minimal brown/beige design, local Instrument Serif and Manrope, smooth `k.` sidebar collapse and readable white/beige sidebar footer. Frontend tests/build and focused regional integration tests passed; production deployment remains pending. [Decision record](2026-11-19-kanook-portal-integration.md), [release handoff](../docs/BACKEND-CONNECTION.md).
+
 - 2026-11-17: Added the requested interactive MVP sample workspace, darker espresso palette, more whitespace, and home typography increased by 2px. Restored left alignment for the welcome heading/subtitle at the user's follow-up request. [Decision record](2026-11-17-kanook-mvp-demo.md).
 
 - 2026-11-17: Fixed Vercel's FastAPI misdetection by declaring the Vite framework, lockfile install, frontend build and `dist` output in `vercel.json`. The existing Vercel project also had Root Directory set to `server`, causing a missing-output error even after Vite built successfully; cleared that setting and changed its framework preset to Vite. Verified settings persisted after reload and the local production build passed. Python intake and development proxies still require a separate authenticated production backend.

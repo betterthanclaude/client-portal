@@ -19,6 +19,7 @@ const message = (error: unknown) => error instanceof Error ? error.message : "So
 export function ProjectUploads({ projectId, onUseApi }: { projectId: string; onUseApi: () => void }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const uploadController = useRef<AbortController | null>(null);
+  const s3Credentials = useRef({ access_key_id: '', secret_access_key: '', session_token: '' });
   const [method, setMethod] = useState<(typeof METHODS)[number]["id"]>("s3");
   const [files, setFiles] = useState<File[]>([]);
   const [stored, setStored] = useState<StoredFile[]>([]);
@@ -60,7 +61,8 @@ export function ProjectUploads({ projectId, onUseApi }: { projectId: string; onU
         session_token: String(data.get("session_token") || "").trim() || undefined,
       });
       setConnection(result);
-      for (const name of ["access_key_id", "secret_access_key", "session_token"]) (form.elements.namedItem(name) as HTMLInputElement).value = "";
+      s3Credentials.current = result.next_cursor ? { access_key_id: String(data.get('access_key_id') || ''), secret_access_key: String(data.get('secret_access_key') || ''), session_token: String(data.get('session_token') || '') } : { access_key_id: '', secret_access_key: '', session_token: '' };
+      for (const name of ["access_key_id", "secret_access_key", "session_token"]) { const input = form.elements.namedItem(name) as HTMLInputElement | null; if (input) input.value = ''; }
       await refreshFiles();
       setNotice(DEMO_MODE ? `${result.indexed} sample files added. No connection to a real bucket was made.` : `${result.indexed} file references added. Files remain in your S3 bucket.${result.next_cursor ? " More files are available below." : ""}`);
     } catch (error) { setNotice(message(error)); }
@@ -71,7 +73,8 @@ export function ProjectUploads({ projectId, onUseApi }: { projectId: string; onU
     if (!connection?.next_cursor) return;
     setBusy(true);
     try {
-      const result = await indexBucket(projectId, connection.id, connection.next_cursor);
+      const result = await indexBucket(projectId, connection.id, connection.next_cursor, s3Credentials.current);
+      if (!result.next_cursor) s3Credentials.current = { access_key_id: '', secret_access_key: '', session_token: '' };
       setConnection({ ...connection, ...result });
       await refreshFiles();
       setNotice(`${result.indexed} more file references added.`);

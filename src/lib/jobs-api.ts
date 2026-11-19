@@ -1,0 +1,10 @@
+import { apiRequest } from './http.ts';
+export type Reference = { manifest_id: string; manifest_sha256: string };
+export type Dispatch = { connection_id: string; dataset: Reference; specification: Reference; execution_profile: string; coverage: { mode: 'all' } | { mode: 'sample'; every_nth_recording: number; offset: number }; deadline_seconds: number };
+export type Job = { id: string; status: string; created: number; execution?: { status: string }; execution_status?: string; actions?: { cancel?: boolean; execute?: boolean; results?: boolean } };
+export const listProjectRuns = (projectId: string) => apiRequest<{ items: Job[] }>(`/workspace/projects/${encodeURIComponent(projectId)}/runs`);
+export const dispatchProject = (projectId: string, payload: Dispatch, key: string) => apiRequest<Job>(`/workspace/projects/${encodeURIComponent(projectId)}/runs`, { method: 'POST', headers: { 'Idempotency-Key': key }, body: JSON.stringify(payload) });
+export const readJob = (id: string) => apiRequest<Job>(`/qc-api/v1/dataset-jobs/${encodeURIComponent(id)}`);
+export const readResults = (id: string) => apiRequest<Record<string, unknown>>(`/qc-api/v1/dataset-jobs/${encodeURIComponent(id)}/results`);
+export const executeJob = (id: string, key: string) => apiRequest<Job>(`/qc-api/v1/dataset-jobs/${encodeURIComponent(id)}/execute`, { method: 'POST', headers: { 'Idempotency-Key': key }, body: '{}' });
+export const cancelJob = (id: string, key: string) => apiRequest<Job>(`/qc-api/v1/dataset-jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST', headers: { 'Idempotency-Key': key }, body: '{}' });

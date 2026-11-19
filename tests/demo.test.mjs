@@ -6,7 +6,7 @@ Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
   getItem: (key) => storage.get(key) ?? null,
   setItem: (key, value) => storage.set(key, value),
 } });
-globalThis.window = { location: { origin: 'https://portal.example' } };
+globalThis.window = { location: { origin: 'https://portal.example', search: '?demo=1' } };
 globalThis.fetch = () => { throw new Error('The MVP must not contact a backend.'); };
 const api = await import('../src/lib/workspace-api.ts');
 const qc = await import('../src/lib/qc-api.ts');
@@ -46,6 +46,7 @@ test('demo invitations do not send email and resolve to the correct project', as
   const member = await api.inviteMember('retail-spaces', 'teammate@example.test');
   assert.equal(member.status, 'pending_delivery');
   const token = new URL(member.invitation_url).searchParams.get('invitation');
+  assert.equal(new URL(member.invitation_url).searchParams.get('demo'), '1');
   assert.equal((await api.acceptInvitation(token)).id, 'retail-spaces');
   assert.equal((await api.acceptInvitation('demo-join')).id, 'urban-mobility');
   await assert.rejects(api.acceptInvitation('invalid'), /sample invitation/);
@@ -60,6 +61,10 @@ test('generated sample keys persist as metadata and cannot be mistaken for live 
   assert.equal((await qc.listQcKeys()).items[0].name, 'MVP research');
   assert.ok(!storage.get(DEMO_STORAGE_KEY).includes(key.token));
   assert.ok(!storage.get(DEMO_STORAGE_KEY).includes(qcKey.token));
+  await api.revokeUploadKey('urban-mobility', key.id);
+  assert.equal((await api.listUploadKeys('urban-mobility')).items[0].revoked, true);
+  await qc.revokeQcKey(qcKey.id);
+  assert.equal((await qc.listQcKeys()).items[0].revoked, true);
 });
 
 test('file previews store metadata only and cancelled uploads do not change the dataset', async () => {
